@@ -8,7 +8,7 @@
 import           Control.Arrow
 import           Control.Arrow.ArrowTree (getChildren, multi)
 import           Control.Monad.IO.Class  (liftIO, MonadIO)
-import           Control.Monad (filterM, liftM)
+import           Control.Monad (filterM, foldM, liftM)
 import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.Maybe
 import           Data.Maybe
@@ -88,6 +88,16 @@ getLinksFromFeed url =  do
     let items = getFeedItems feed
     return $ catMaybes $ map getItemLink items
 
+getLinksForCurator :: Curator -> MaybeT IO [String]
+getLinksForCurator (Curator _ _ feedUrl) = 
+    getLinksFromFeed feedUrl
+
+getLinksForCurators :: [Curator] -> MaybeT IO [String]
+getLinksForCurators curators = foldM app [] curators
+    where app :: [String] -> Curator -> MaybeT IO [String]
+          app links curator = do
+              curatorLinks <- getLinksForCurator curator
+              return $ links ++ curatorLinks
 
 connectionString = "host=localhost dbname=artrank user=weirdcanada password=weirdcanada port=5432"
 
@@ -100,6 +110,8 @@ main = withPostgresqlPool connectionString 10 $ \pool -> do
     silentShoutId <- insert $ Curator "Silent Shout" "silentshout.ca" "http://silentshout.ca/feed"
 
     oneWeirdCurator <- selectList [CuratorName ==. "Weird Canada"] [LimitTo 1]
+    
+    -- links <- runMaybeT $ getLinksForCurator (oneWeirdCurator :: Curator)
 
     curators <- getFeeds
 
