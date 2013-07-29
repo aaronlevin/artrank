@@ -11,9 +11,9 @@ Executable art-rank
                   persistent-postgresql,
                   persistent-template,
                   transformers,
-                  hxt,
                   url,
                   HTTP,
                   network,
                   feed,
-                  filepath
+                  filepath,
+                  tagsoup

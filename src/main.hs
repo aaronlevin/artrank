@@ -5,8 +5,6 @@
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeFamilies      #-}
 {-# LANGUAGE EmptyDataDecls    #-}
-import           Control.Arrow
-import           Control.Arrow.ArrowTree (getChildren, multi)
 import           Control.Monad.IO.Class  (liftIO, MonadIO)
 import           Control.Monad (filterM, foldM, liftM)
 import           Control.Monad.Trans.Class (lift)
@@ -23,10 +21,6 @@ import           Network.URI (parseURI)
 import           Text.Feed.Import
 import           Text.Feed.Types (Feed)
 import           Text.Feed.Query (getFeedItems, getItemLink)
-import           Text.XML.HXT.Arrow.ReadDocument (readString)
-import           Text.XML.HXT.Arrow.XmlArrow (ArrowXml, getText, hasName)
-import           Text.XML.HXT.Arrow.XmlState (IOSArrow, no, runX, withParseHTML, withWarnings, yes)
-import           Text.XML.HXT.DOM.TypeDefs (XmlTree, XNode)
 import           System.FilePath
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
@@ -71,8 +65,8 @@ getFeedFromUrl url = do
     lift $ tell ["Opened Url: " ++ url]
     let result = parseFeedString contents
     lift $ case result of
-        Nothing -> tell ["Failed to parse url: " ++ url]
-        Just x -> tell ["Succesfully parsed ur: " ++ url]
+        Nothing -> tell ["Failed to parse URL: " ++ url]
+        Just x -> tell ["Succesfully parsed URL: " ++ url]
     MaybeT $ return $ parseFeedString contents
 
 getLinksFromFeed :: String -> MaybeT (WriterT [String] IO) [String]
@@ -111,8 +105,8 @@ main = withPostgresqlPool connectionString 10 $ \pool -> do
     
     -- links <- runMaybeT $ getLinksForCurator (oneWeirdCurator :: Curator)
 
-    curators <- getFeeds
-    --let curators = [Curator "Weird Canada" "weirdcanada.com" "http://weirdcanada.com/feed"]
+    --curators <- getFeeds
+    let curators = [Curator "Weird Canada" "weirdcanada.com" "http://pitchfork.com/rss/reviews/albums/"]
 
 
     (links,logs) <- liftIO $ runWriterT $ runMaybeT $ getLinksForCurators curators
