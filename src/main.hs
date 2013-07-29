@@ -11,6 +11,7 @@ import           Control.Monad.IO.Class  (liftIO, MonadIO)
 import           Control.Monad (filterM, foldM, liftM)
 import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.Maybe
+import           Control.Monad.Trans.Writer.Lazy (runWriterT, tell, WriterT, writer)
 import           Data.Maybe
 import           Data.Tree.NTree.TypeDefs (NTree)
 import           Database.Persist
@@ -26,6 +27,7 @@ import           Text.XML.HXT.Arrow.ReadDocument (readString)
 import           Text.XML.HXT.Arrow.XmlArrow (ArrowXml, getText, hasName)
 import           Text.XML.HXT.Arrow.XmlState (IOSArrow, no, runX, withParseHTML, withWarnings, yes)
 import           Text.XML.HXT.DOM.TypeDefs (XmlTree, XNode)
+import           System.FilePath
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Curator
@@ -58,46 +60,42 @@ getFeeds = do
   return curators
 
 -- Stolen from http://adit.io/posts/2012-03-10-building_a_concurrent_web_scraper_with_haskell.html
-openUrl :: String -> MaybeT IO String
+openUrl :: String -> MaybeT (WriterT [String] IO) String
 openUrl url = case parseURI url of
-    Nothing -> fail ""
-    Just u -> liftIO(getResponseBody =<< simpleHTTP (mkRequest GET u))
+    Nothing -> lift $ writer (fail "", ["Could not parse URI: " ++ url])
+    Just u -> lift $ liftIO(getResponseBody =<< simpleHTTP (mkRequest GET u))
 
-css :: ArrowXml a => String -> a XmlTree XmlTree
-css tag = multi (hasName tag)
-
--- might want to update for xml feeds.
-getUrl :: String -> IO (IOSArrow XmlTree (NTree XNode))
-getUrl url = do 
-    contents <- runMaybeT $ openUrl url
-    return $ readString [withParseHTML no, withWarnings no] (fromMaybe "" contents)
-
-getUrlAsString :: String -> IO String
-getUrlAsString url = do
-    contents <- runMaybeT $ openUrl url
-    return $ fromMaybe "" contents
-
-getFeedFromUrl :: String -> MaybeT IO Feed
+getFeedFromUrl :: String -> MaybeT (WriterT [String] IO) Feed
 getFeedFromUrl url = do 
     contents <- openUrl url
+    lift $ tell ["Opened Url: " ++ url]
+    let result = parseFeedString contents
+    lift $ case result of
+        Nothing -> tell ["Failed to parse url: " ++ url]
+        Just x -> tell ["Succesfully parsed ur: " ++ url]
     MaybeT $ return $ parseFeedString contents
 
-getLinksFromFeed :: String -> MaybeT IO [String]
+getLinksFromFeed :: String -> MaybeT (WriterT [String] IO) [String]
 getLinksFromFeed url =  do
     feed <- getFeedFromUrl url
     let items = getFeedItems feed
     return $ catMaybes $ map getItemLink items
 
-getLinksForCurator :: Curator -> MaybeT IO [String]
+getLinksForCurator :: Curator -> MaybeT (WriterT [String] IO) [String]
 getLinksForCurator (Curator _ _ feedUrl) = 
     getLinksFromFeed feedUrl
 
-getLinksForCurators :: [Curator] -> MaybeT IO [String]
+
+getLinksForCurators :: [Curator] -> MaybeT (WriterT [String] IO) [String]
 getLinksForCurators curators = foldM app [] curators
-    where app :: [String] -> Curator -> MaybeT IO [String]
-          app links curator = do
-              curatorLinks <- getLinksForCurator curator
-              return $ links ++ curatorLinks
+    where app :: [String] -> Curator -> MaybeT (WriterT [String] IO) [String]
+          app links curator = lift $ do
+              maybeNewLinks <- runMaybeT $ getLinksForCurator curator
+              case maybeNewLinks of
+                  Nothing -> writer (links, ["Unable to add new links for curator: " ++ (show curator)])
+                  Just newLinks -> writer (links ++ newLinks, [])
+          
+              --return $ links ++ curatorLinks
 
 connectionString = "host=localhost dbname=artrank user=weirdcanada password=weirdcanada port=5432"
 
@@ -106,15 +104,20 @@ main = withPostgresqlPool connectionString 10 $ \pool -> do
   flip runSqlPersistMPool pool $ do
     runMigration migrateAll
 
-    weirdCanadaId <- insert $ Curator "Weird Canada" "weirdcanada.com" "http://weirdcanada.com/feed"
-    silentShoutId <- insert $ Curator "Silent Shout" "silentshout.ca" "http://silentshout.ca/feed"
+    --weirdCanadaId <- insert $ Curator "Weird Canada" "weirdcanada.com" "http://weirdcanada.com/feed"
+    --silentShoutId <- insert $ Curator "Silent Shout" "silentshout.ca" "http://silentshout.ca/feed"
 
     oneWeirdCurator <- selectList [CuratorName ==. "Weird Canada"] [LimitTo 1]
     
     -- links <- runMaybeT $ getLinksForCurator (oneWeirdCurator :: Curator)
 
     curators <- getFeeds
+    --let curators = [Curator "Weird Canada" "weirdcanada.com" "http://weirdcanada.com/feed"]
+
+
+    (links,logs) <- liftIO $ runWriterT $ runMaybeT $ getLinksForCurators curators
+    liftIO $ print links
+    liftIO $ print logs
 
     liftIO $ print curators
     --liftIO $ print (oneWeirdCurator :: [Entity Curator])
-

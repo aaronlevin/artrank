@@ -15,4 +15,5 @@ Executable art-rank
                   url,
                   HTTP,
                   network,
-                  feed
+                  feed,
+                  filepath
