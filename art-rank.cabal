@@ -16,4 +16,5 @@ Executable art-rank
                   network,
                   feed,
                   filepath,
-                  tagsoup
+                  hxt,
+                  hxt-tagsoup

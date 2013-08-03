@@ -11,7 +11,7 @@ import           Control.Monad.Trans.Class (lift)
 import           Control.Monad.Trans.Maybe
 import           Control.Monad.Trans.Writer.Lazy (runWriterT, tell, WriterT, writer)
 import           Data.Maybe
-import           Data.Tree.NTree.TypeDefs (NTree)
+import           Data.Monoid (mconcat)
 import           Database.Persist
 import           Database.Persist.Postgresql
 import           Database.Persist.TH
@@ -21,6 +21,11 @@ import           Network.URI (parseURI)
 import           Text.Feed.Import
 import           Text.Feed.Types (Feed)
 import           Text.Feed.Query (getFeedItems, getItemLink)
+import           Text.XML.HXT.Arrow.ReadDocument
+import           Text.XML.HXT.Arrow.WriteDocument
+import           Text.XML.HXT.Arrow.XmlArrow (selem)
+import           Text.XML.HXT.Core
+import           Text.XML.HXT.TagSoup
 import           System.FilePath
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
@@ -36,7 +41,6 @@ Article
   curatorId CuratorId
   deriving Show
 |]
-
 
 --getFeeds :: MonadIO m => ConnectionPool -> m [Curator]
 --getFeeds = \pool -> liftIO $ flip runSqlPersistMPool pool $ do
@@ -59,11 +63,22 @@ openUrl url = case parseURI url of
     Nothing -> lift $ writer (fail "", ["Could not parse URI: " ++ url])
     Just u -> lift $ liftIO(getResponseBody =<< simpleHTTP (mkRequest GET u))
 
+--cleanTags :: String -> String
+--cleanTags html = renderTags $ parseTags html
+--cleanTags html = case (runLA (selem "/" [xread] >>> writeDocumentToString [withOutputXML]) html) of
+--cleanTags html = case (runLA (readString [withTagSoup] html >>> writeDocumentToString [withOutputXML])) of
+--    [] -> ""
+--    x:sx -> x
+
+cleanTags :: String -> (WriterT [String] IO) String
+cleanTags html = liftIO $ liftM mconcat $ runX (readString [withValidate yes, withTagSoup] html >>> writeDocumentToString [withOutputXML])
+
 getFeedFromUrl :: String -> MaybeT (WriterT [String] IO) Feed
 getFeedFromUrl url = do 
     contents <- openUrl url
+    cleansedContents <- lift $ cleanTags contents
     lift $ tell ["Opened Url: " ++ url]
-    let result = parseFeedString contents
+    let result = parseFeedString $ cleansedContents
     lift $ case result of
         Nothing -> tell ["Failed to parse URL: " ++ url]
         Just x -> tell ["Succesfully parsed URL: " ++ url]
@@ -79,6 +94,8 @@ getLinksForCurator :: Curator -> MaybeT (WriterT [String] IO) [String]
 getLinksForCurator (Curator _ _ feedUrl) = 
     getLinksFromFeed feedUrl
 
+getCuratorName :: Curator -> String
+getCuratorName (Curator name _ _) = name
 
 getLinksForCurators :: [Curator] -> MaybeT (WriterT [String] IO) [String]
 getLinksForCurators curators = foldM app [] curators
@@ -86,10 +103,11 @@ getLinksForCurators curators = foldM app [] curators
           app links curator = lift $ do
               maybeNewLinks <- runMaybeT $ getLinksForCurator curator
               case maybeNewLinks of
-                  Nothing -> writer (links, ["Unable to add new links for curator: " ++ (show curator)])
+                  Nothing -> writer (links, ["Unable to add new links for curator: " ++ (getCuratorName curator)])
                   Just newLinks -> writer (links ++ newLinks, [])
           
-              --return $ links ++ curatorLinks
+-- Insert links into the database
+
 
 connectionString = "host=localhost dbname=artrank user=weirdcanada password=weirdcanada port=5432"
 
@@ -113,5 +131,4 @@ main = withPostgresqlPool connectionString 10 $ \pool -> do
     liftIO $ print links
     liftIO $ print logs
 
-    liftIO $ print curators
     --liftIO $ print (oneWeirdCurator :: [Entity Curator])
